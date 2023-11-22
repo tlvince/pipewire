@@ -22,6 +22,11 @@
 
 #define MAX_PACS	64
 
+static struct spa_log *log;
+static struct spa_log_topic log_topic = SPA_LOG_TOPIC(0, "spa.bluez5.codecs.lc3");
+#undef SPA_LOG_TOPIC_DEFAULT
+#define SPA_LOG_TOPIC_DEFAULT &log_topic
+
 struct impl {
 	lc3_encoder_t enc[LC3_MAX_CHANNELS];
 	lc3_decoder_t dec[LC3_MAX_CHANNELS];
@@ -172,13 +177,13 @@ static uint8_t get_num_channels(uint32_t channels)
 	return num;
 }
 
-static int select_channels(uint8_t channels, uint32_t locations, uint32_t *mapping)
+static int select_channels(uint8_t channels, uint32_t locations, uint32_t *mapping, unsigned int max_channels)
 {
-	unsigned int i, num;
+	unsigned int i, num = 0;
 
-	if (channels & LC3_CHAN_2)
+	if ((channels & LC3_CHAN_2) && max_channels >= 2)
 		num = 2;
-	else if (channels & LC3_CHAN_1)
+	else if ((channels & LC3_CHAN_1) && max_channels >= 1)
 		num = 1;
 	else
 		return -1;
@@ -208,6 +213,7 @@ static bool select_config(bap_lc3_t *conf, const struct pac_data *pac)
 	size_t data_size = pac->size;
 	uint16_t framelen_min = 0, framelen_max = 0;
 	int max_frames = -1;
+	uint8_t channels = 0;
 
 	if (!data_size)
 		return false;
@@ -221,8 +227,10 @@ static bool select_config(bap_lc3_t *conf, const struct pac_data *pac)
 	while (data_size > 0) {
 		struct ltv *ltv = (struct ltv *)data;
 
-		if (ltv->len < sizeof(struct ltv) || ltv->len >= data_size)
+		if (ltv->len < sizeof(struct ltv) || ltv->len >= data_size) {
+			spa_log_debug(log, "invalid LTV data");
 			return false;
+		}
 
 		switch (ltv->type) {
 		case LC3_TYPE_FREQ:
@@ -237,8 +245,10 @@ static bool select_config(bap_lc3_t *conf, const struct pac_data *pac)
 					conf->rate = LC3_CONFIG_FREQ_16KHZ;
 				else if (rate & LC3_FREQ_8KHZ)
 					conf->rate = LC3_CONFIG_FREQ_8KHZ;
-				else
+				else {
+					spa_log_debug(log, "unsupported rate: 0x%04x", rate);
 					return false;
+				}
 			}
 			break;
 		case LC3_TYPE_DUR:
@@ -249,17 +259,16 @@ static bool select_config(bap_lc3_t *conf, const struct pac_data *pac)
 					conf->frame_duration = LC3_CONFIG_DURATION_10;
 				else if (duration & LC3_DUR_7_5)
 					conf->frame_duration = LC3_CONFIG_DURATION_7_5;
-				else
+				else {
+					spa_log_debug(log, "unsupported duration: 0x%02x", duration);
 					return false;
+				}
 			}
 			break;
 		case LC3_TYPE_CHAN:
 			spa_return_val_if_fail(ltv->len == 2, false);
 			{
-				uint8_t channels = ltv->value[0];
-
-				if (select_channels(channels, pac->locations, &conf->channels) < 0)
-					return false;
+				channels = ltv->value[0];
 			}
 			break;
 		case LC3_TYPE_FRAMELEN:
@@ -272,22 +281,35 @@ static bool select_config(bap_lc3_t *conf, const struct pac_data *pac)
 			max_frames = ltv->value[0];
 			break;
 		default:
-			return false;
+			spa_log_debug(log, "unknown LTV type: 0x%02x", ltv->type);
+			break;
 		}
 		data_size -= ltv->len + 1;
 		data += ltv->len + 1;
 	}
 
+	if (select_channels(channels, pac->locations, &conf->channels, max_frames) < 0) {
+		spa_log_debug(log, "invalid channel configuration: 0x%02x %u",
+				channels, max_frames);
+		return false;
+	}
+
 	/* Default: 1 per channel (BAP v1.0.1 Sec 4.3.1) */
 	if (max_frames < 0)
 		max_frames = get_num_channels(conf->channels);
-	if (max_frames < get_num_channels(conf->channels))
+	if (max_frames < get_num_channels(conf->channels)) {
+		spa_log_debug(log, "invalid max frames per SDU: %u", max_frames);
 		return false;
+	}
 
-	if (framelen_min < LC3_MIN_FRAME_BYTES || framelen_max > LC3_MAX_FRAME_BYTES)
+	if (framelen_min < LC3_MIN_FRAME_BYTES || framelen_max > LC3_MAX_FRAME_BYTES) {
+		spa_log_debug(log, "invalid framelen: %u %u", framelen_min, framelen_max);
 		return false;
-	if (conf->frame_duration == 0xFF || !conf->rate)
+	}
+	if (conf->frame_duration == 0xFF || !conf->rate) {
+		spa_log_debug(log, "no frame duration or rate");
 		return false;
+	}
 
 	/* BAP v1.0.1 Table 5.2; high-reliability */
 	switch (conf->rate) {
@@ -316,7 +338,8 @@ static bool select_config(bap_lc3_t *conf, const struct pac_data *pac)
 			conf->framelen = 30;	/* 8_2_2 */
 		break;
 	default:
-			return false;
+		spa_log_debug(log, "invalid rate");
+		return false;
 	}
 
 	return true;
@@ -445,10 +468,13 @@ static int codec_select_config(const struct media_codec *codec, uint32_t flags,
 
 	/* Select best conf from those possible */
 	npacs = parse_bluez_pacs(caps, caps_size, pacs);
-	if (npacs < 0)
+	if (npacs < 0) {
+		spa_log_debug(log, "malformed PACS");
 		return npacs;
-	else if (npacs == 0)
+	} else if (npacs == 0) {
+		spa_log_debug(log, "no PACS");
 		return -EINVAL;
+	}
 
 	for (i = 0; i < npacs; ++i)
 		pacs[i].locations = locations;
@@ -892,6 +918,12 @@ static int codec_increase_bitpool(void *data)
 	return -ENOTSUP;
 }
 
+static void codec_set_log(struct spa_log *global_log)
+{
+	log = global_log;
+	spa_log_topic_init(log, &log_topic);
+}
+
 const struct media_codec bap_codec_lc3 = {
 	.id = SPA_BLUETOOTH_AUDIO_CODEC_LC3,
 	.name = "lc3",
@@ -913,7 +945,8 @@ const struct media_codec bap_codec_lc3 = {
 	.start_decode = codec_start_decode,
 	.decode = codec_decode,
 	.reduce_bitpool = codec_reduce_bitpool,
-	.increase_bitpool = codec_increase_bitpool
+	.increase_bitpool = codec_increase_bitpool,
+	.set_log = codec_set_log,
 };
 
 MEDIA_CODEC_EXPORT_DEF(
