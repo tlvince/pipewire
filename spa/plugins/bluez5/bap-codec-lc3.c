@@ -315,6 +315,15 @@ static bool select_config(bap_lc3_t *conf, const struct pac_data *pac,	struct sp
 		data += ltv->len + 1;
 	}
 
+	if (channels & LC3_CHAN_2) {
+		/* Creative Zen Hybrid Pro sets Supported_Max_Codec_Frames_Per_SDU == 1
+		 * but channels&0x2, and the 2-channel audio stream works. It should have
+		 * set Supported_Max_Codec_Frames_Per_SDU >= 2 (BAP v1.0.1 Sec 4.3.1).
+		 * Work around this...
+		 */
+		max_frames = SPA_MAX(max_frames, 2);
+	}
+
 	if (select_channels(channels, pac->locations, &conf->channels, max_frames) < 0) {
 		spa_debugc(debug_ctx, "invalid channel configuration: 0x%02x %u",
 				channels, max_frames);
