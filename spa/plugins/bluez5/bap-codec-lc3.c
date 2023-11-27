@@ -465,6 +465,16 @@ static int conf_cmp(const bap_lc3_t *conf1, int res1, const bap_lc3_t *conf2, in
 	PREFER_BOOL(conf->channels & LC3_CHAN_2);
 	PREFER_BOOL(conf->channels & LC3_CHAN_1);
 	PREFER_BOOL(conf->rate & (LC3_CONFIG_FREQ_48KHZ | LC3_CONFIG_FREQ_24KHZ | LC3_CONFIG_FREQ_16KHZ | LC3_CONFIG_FREQ_8KHZ));
+
+	/* 16KHz input is mandatory in BAP v1.0.1 Table 3.5, so prefer it for now.
+	 *
+	 * Devices may list other values but not certain they will work.
+	 * E.g. Creative Zen Hybrid Pro disconnects (crashes?) if we
+	 * try something else here.
+	 */
+	if (conf->sink)
+		PREFER_BOOL(conf->rate & LC3_CONFIG_FREQ_16KHZ);
+
 	PREFER_BOOL(conf->rate & LC3_CONFIG_FREQ_48KHZ);
 	PREFER_BOOL(conf->rate & LC3_CONFIG_FREQ_24KHZ);
 	PREFER_BOOL(conf->rate & LC3_CONFIG_FREQ_16KHZ);
@@ -811,6 +821,9 @@ static void *codec_init(const struct media_codec *codec, uint32_t flags,
 		res = -EINVAL;
 		goto error;
 	}
+
+	spa_log_info(log, "LC3 rate:%d frame_duration:%d channels:%d framelen:%d",
+			this->samplerate, this->frame_dus, this->channels, this->framelen);
 
 	this->samples = lc3_frame_samples(this->frame_dus, this->samplerate);
 	if (this->samples < 0) {
