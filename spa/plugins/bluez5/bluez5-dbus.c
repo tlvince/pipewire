@@ -914,6 +914,11 @@ static DBusHandlerResult endpoint_select_properties(DBusConnection *conn, DBusMe
 		goto error;
 	}
 
+	if (sink) {
+		err_msg = "Let's not";
+		goto error;
+	}
+
 	/* Parse endpoint properties */
 	if (parse_endpoint_props(monitor, &props, caps, &caps_size, &endpoint_path, &endpoint_qos) < 0)
 		goto error_invalid;
