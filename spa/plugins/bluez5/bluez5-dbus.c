@@ -934,6 +934,7 @@ static DBusHandlerResult endpoint_select_properties(DBusConnection *conn, DBusMe
 	for (i = 0; i < (int)monitor->global_settings.n_items; ++i)
 		setting_items[i] = monitor->global_settings.items[i];
 	setting_items[i++] = SPA_DICT_ITEM_INIT("bluez5.bap.locations", locations);
+	setting_items[i++] = SPA_DICT_ITEM_INIT("bluez5.bap.sink", sink ? "true" : "false");
 	setting_items[i++] = SPA_DICT_ITEM_INIT("bluez5.bap.debug", "true");
 	settings = SPA_DICT_INIT(setting_items, i);
 

@@ -46,6 +46,7 @@ struct pac_data {
 	size_t size;
 	int index;
 	uint32_t locations;
+	bool sink;
 };
 
 typedef struct {
@@ -54,6 +55,7 @@ typedef struct {
 	uint32_t channels;
 	uint16_t framelen;
 	uint8_t n_blks;
+	bool sink;
 } bap_lc3_t;
 
 static const struct {
@@ -245,6 +247,8 @@ static bool select_config(bap_lc3_t *conf, const struct pac_data *pac,	struct sp
 	if (!data_size)
 		return false;
 	memset(conf, 0, sizeof(*conf));
+
+	conf->sink = pac->sink;
 
 	conf->frame_duration = 0xFF;
 
@@ -496,6 +500,7 @@ static int codec_select_config(const struct media_codec *codec, uint32_t flags,
 	bap_lc3_t conf;
 	uint8_t *data = config;
 	uint32_t locations = 0;
+	bool sink = false;
 	struct spa_debug_log_ctx debug_ctx = SPA_LOG_DEBUG_INIT(log, SPA_LOG_LEVEL_TRACE);
 	int i;
 
@@ -509,6 +514,9 @@ static int codec_select_config(const struct media_codec *codec, uint32_t flags,
 
 		if (spa_atob(spa_dict_lookup(settings, "bluez5.bap.debug")))
 			debug_ctx = SPA_LOG_DEBUG_INIT(log, SPA_LOG_LEVEL_DEBUG);
+
+		/* Is remote endpoint sink or source */
+		sink = spa_atob(spa_dict_lookup(settings, "bluez5.bap.sink"));
 	}
 
 	/* Select best conf from those possible */
@@ -521,8 +529,10 @@ static int codec_select_config(const struct media_codec *codec, uint32_t flags,
 		return -EINVAL;
 	}
 
-	for (i = 0; i < npacs; ++i)
+	for (i = 0; i < npacs; ++i) {
 		pacs[i].locations = locations;
+		pacs[i].sink = sink;
+	}
 
 	qsort(pacs, npacs, sizeof(struct pac_data), pac_cmp);
 
