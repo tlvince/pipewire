@@ -52,7 +52,7 @@ struct props {
 	char clock_name[64];
 };
 
-#define FILL_FRAMES 4
+#define FILL_FRAMES 8
 #define MIN_BUFFERS 3
 #define MAX_BUFFERS 32
 #define BUFFER_SIZE	(8192*8)
